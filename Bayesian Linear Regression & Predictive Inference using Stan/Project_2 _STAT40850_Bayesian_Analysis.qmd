@@ -1,0 +1,192 @@
+---
+title: "Project 2 STAT40850 Bayesian Analysis (online)"
+author: "Charalampos Sarakatsanis"
+format: pdf
+editor: visual
+---
+
+## The dataset
+
+```{r}
+load(url("https://acaimo.github.io/teaching/data/foodexp.RData"))
+```
+
+## Question 1
+
+```{r, message=FALSE,warning=FALSE, error=FALSE}
+Sys.setenv(R_MAKEVARS_USER = normalizePath("~/.R/Makevars.win", winslash = "/"))
+library(rstan)
+model_data = list(
+  n = length(foodexp$food), 
+  x1 = foodexp$income,
+  x2 = foodexp$persons,
+  y = foodexp$food
+)
+stancode='
+data {
+  int <lower=1> n;
+  vector[n] x1; // income
+  vector[n] x2; // persons
+  vector[n] y; //food
+}
+parameters{
+  real alpha;
+  real beta1;
+  real beta2;
+  real<lower=0> sigma;
+}
+transformed parameters{
+  vector[n] mu = alpha + beta1 * x1 + beta2 * x2;
+}
+model {
+  alpha ~ normal(16, 4);
+  beta1 ~ normal(0.3, 0.1);
+  beta2 ~ normal(3.8, 1);
+  sigma ~ exponential(0.2);
+  y ~ normal(mu, sigma);
+}
+generated quantities {
+  vector[n] y_tilde;
+  for (i in 1:n) y_tilde[i] = normal_rng(mu[i], sigma);
+}
+'
+```
+
+We formulated a Bayesian linear model for daily food expenditure ($y$) using a Normal distribution: $y \sim \text{Normal}(\mu, \sigma)$. Our priors were $\alpha \sim \text{N}(16, 4)$, $\beta_1 \sim \text{N}(0.3, 0.1)$, and $\beta_2 \sim \text{N}(3.8, 1)$.
+
+The normal probability distribution has infinite support (-$\infty$,$\infty$), which means that when $\mu$ is small (when there are a few `people` or very low `daily income`) and $\sigma$ is large, the standard deviation tail might hit some points bellow 0. A log-normal model, would stabilize the model and fix this rare abnormality.
+
+## Question 2
+
+```{r, fig.width=5, fig.height=3, message=FALSE,warning=FALSE, error=FALSE}
+#| echo: true
+#| message: false
+#| warning: false
+#| results: 'hide'
+library(bayesplot)
+NLR_model = stan_model(model_code = stancode)
+NLR_posterior = sampling(NLR_model, 
+                          iter = 2000,
+                          seed = 1,
+                          data = model_data,
+                         refresh = 0)
+n = length(foodexp$food)
+x1 = foodexp$income
+x2 = foodexp$persons
+y = foodexp$food
+```
+
+```{r}
+print(NLR_posterior, pars = c('alpha', 'beta1', 'beta2', 'sigma'))
+y_tilde <- as.matrix(NLR_posterior, pars = c("y_tilde"))
+ppc_dens_overlay(y, y_tilde[1:1000, ])
+```
+
+After implementing the model, we conclude (based on the means) that we have an intercept equal to 4.62, we have a 0.13€ increase in food expenditures each time income increases by 1€, and a 1.15€ increase each time the number of people increases by 1. After looking at the Posterior Predictive Check (PPC), we can detect an accurate mean, since y is well-centered within the simulated draws's examples. However, the standard deviation ($\sigma$=4.42, a little less than the intercept) and the curve indicate high uncertainty. This high variance also explains the negative results. For all of the model's parameters, Rhat=1 which means the model's 4 independent chains have converged and report the same results. This means that our posterior estimates are reliable.
+
+## Question 3
+
+```{r}
+post_draws <- as.data.frame(NLR_posterior)
+fixed_income = 50
+#mean of the posterior model predictions.
+mu_post_fixed_income = post_draws$alpha + 
+  post_draws$beta1*50 + 
+  post_draws$beta2*mean(foodexp$persons)
+#mean of the prior model predictions.
+mu_prior_fixed_income = rnorm(1000, 16, 4)+
+  (rnorm(1000, 0.3, 0.1) * 50) +
+  (rnorm(1000, 3.8, 1) * mean(foodexp$persons))
+#prior distribution interval
+prior_interval90 = quantile(mu_prior_fixed_income, c(0.05, 0.5, 0.95))
+#posterior distribution interval
+post_interval90 = quantile(mu_post_fixed_income, c(0.05, 0.5, 0.95))
+#prior distribution interval
+prior_median = median(mu_prior_fixed_income)
+post_median = median(mu_post_fixed_income)
+print(prior_interval90)
+cat("The median for the prior distribution is:", prior_median, "\n\n")
+print(post_interval90)
+cat("The median for the posterior distribution is:", post_median)
+```
+
+Before looking at the data we are expecting a median food expenditure at around 44.57€. That is a considerably higher number in comparison to the posterior distribution's result, which is equal to around 15.20€. The 90% interval for the prior distribution shows a massive variance with the food expenditure ranging from 32.52€ to 57.29€. On the other hand the posteriori, has a mode stable standard deviation and realistic results with the 90% interval ranging from 13.99€ to 16.89€. This clarifies the fact that our initial priors were much higher than the should be. The assumption that a household who earns 50€ per day, will spend approximately 45€ for food while the actual case is much lower, with the food expenses consuming about 30% of the total income instead of around 90%. Even if we only have a small sample size (n=38),, the data was informative enough to rapidly reduce the uncertainty and provide a much more accurate solution of the expected food expenditures. The Bayesian framework successfully moved far from the priors updating the prior assumptions with actual economical facts from the dataset.
+
+## Question 4
+
+```{r}
+#function to apply 2 times to cut the 10th and 90th percentiles.
+pp_hpdi_80 <- apply(y_tilde, 2, function(x) quantile(x, c(0.1, 0.9)))
+#80% lower half 
+pp_hpdi_80_l <- pp_hpdi_80[1, ]
+#80% upper half 
+pp_hpdi_80_u <- pp_hpdi_80[2, ]
+
+#Creating the base scatter plot of the actual data.
+plot(foodexp$income, foodexp$food, 
+     pch = 19, col = "purple", 
+     main = "80% Posterior Prediction Intervals",
+     xlab = "Income (€)", ylab = "Food Expenditure (€)",
+     ylim = c(min(pp_hpdi_80_l), max(pp_hpdi_80_u))) 
+#Adding the 80% prediction intervals as vertical segments
+segments(x0 = foodexp$income, y0 = pp_hpdi_80_l, 
+         x1 = foodexp$income, y1 = pp_hpdi_80_u, 
+         col = "green", lwd = 2)
+
+legend("topleft", legend = c("Observed Data", "80% Prediction Interval"),
+       col = c("purple", "green"), pch = c(19, NA), lty = c(NA, 1),
+       lwd = c(NA, 2))
+```
+
+Now that we have cut 10% from the start and end of the data, our model looks very well calibrated. Most of the observed data (balls), fall within the prediction intervals (the green lines). The high interval width (standard deviation $\sigma$ $\approx$ 4.42) is able to capture the high variety, but illustrate the potential from negative predictions (which are impossible).
+
+## Question 5
+
+```{r}
+mu_72 = post_draws$alpha + 
+  post_draws$beta1*72 + 
+  post_draws$beta2*mean(foodexp$persons)
+
+y_tilde_72 = rnorm(1000, mean = mu_72, sd = post_draws$sigma)
+
+nrow(NLR_posterior)
+
+plot(density(y_tilde_72),
+     main='Posterior Distribution Density curve\n of Food expenditures 
+     with daily income = 72€',
+     ylab = 'Density',
+     xlab = 'Food Expenditures')
+```
+
+The highly informative curve displayed describes the posterior predictive distribution for a house with daily-income=72 is centered between 18.5€ and 20€.. This reflects an upward shift in expected expenditure compared to lower income levels. The high spread of the distribution, ranging from approximately 8€ to 30€, represents the previously discussed uncertainty (due to the $\sigma$$\approx$ 4.42\$ being high). The distribution looks realistic, as the predicted expenditures stay well within the family's budget.
+
+## Question 6
+
+```{r}
+#Calculating prior predeictive mean with income = 68.
+#prior model
+y_tilde_prior_68 = rnorm(1000, 16, 4) + rnorm(1000, 0.25, 0.55) *
+  68 + rnorm(1000, 3, 2.5) * mean(foodexp$persons)+rnorm(1000, 0, 5)
+#The mean.
+prior_prob_68 = mean(y_tilde_prior_68>25 & y_tilde_prior_68<30)
+
+#Calculating posterior predeictive mean with income = 68.
+#posterior model
+y_tilde_post_68 = rnorm(nrow(post_draws), mean = post_draws$alpha +
+                          post_draws$beta1 * 68 +
+                          post_draws$beta2 * mean(foodexp$persons),
+                        sd = post_draws$sigma)
+#The mean.
+post_prob_68 = mean(y_tilde_post_68>25 & y_tilde_post_68<30)
+#results
+cat("Prior P(25 < y < 30):", prior_prob_68, "\n")
+cat("Posterior P(25 < y < 30):", post_prob_68, "\n")
+```
+
+For a household with income=68 we have found the probability of food expenditures from 25€ to 30€:
+
+for prior distribution: $\approx$ 0.045 (4.5%), which means that the probability is low.
+
+for posterior distribution: $\approx$ 0.047 (4.7%)-very close to the results from the prior distribution.
+
+The similarity noticed, indicates that the observed data validated the prior assumptions for this income level. This means that an assumption should not only be made by generalised observations, but also by the range of income. Because the posterior predictive distribution incorporates both updated parameter beliefs and the uncertainty ($\sigma\approx4.42$), it confirms that while 25€–30€ is a low-probability ($\approx$ 5%) event, it remains a realistic possibility for a household at this income level.
