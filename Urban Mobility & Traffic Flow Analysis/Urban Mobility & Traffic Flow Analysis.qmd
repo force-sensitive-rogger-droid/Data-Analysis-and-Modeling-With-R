@@ -538,3 +538,4 @@ For the bar chart, we notice that the peak hours are the ones we expected and me
 - From 20:00 until 07:00, the bicycle traffic is very low. From the peak hours that the plot displays, it is safe to conclude that bike traffic peaks during the hours that people go to work and leave work.
 
 An interesting fact is that we have an “in-between” quiet peak from 12:00 to 13:00 that may reflect lunchtime breaks.
+
