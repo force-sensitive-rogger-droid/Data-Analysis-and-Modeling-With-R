@@ -1,0 +1,183 @@
+---
+title: "Project 1 STAT40850 Bayesian Analysis (online)"
+author: "Charalampos Sarakatsanis"
+format: pdf
+editor: visual
+---
+
+## The Dataset
+
+```{r}
+A_alpha = 169
+A_beta = 296-169
+B_alpha = 247
+B_beta = 380-247
+```
+
+## Question 1
+
+```{r, fig.width=5, fig.height=3}
+#prior samples
+A_s = 130
+A_f = 200-130
+#calculating the prior beta distribution with 
+#pr(thetaA <= 0.5)
+shape1 = A_s
+shape2 = A_f
+#printing the probability of A <= 0.5.
+cat("The probability of less or equal to 50% sucess rate last year
+    \nwith method A is: ",
+    pbeta(0.5, shape1, shape2, log = FALSE), 
+    "\nWith a center of", shape1/(shape1+shape2))
+
+#Printing the cuve
+curve(dbeta(x, A_s, A_f),
+      main = "Prior from Beta(130, 70)",
+      xlab = expression(theta),
+      ylab = "Density",
+      from = 0, to = 1,
+      lwd = 3)
+```
+
+The center is α/(α+β)=130/(130+70)=0.65. This means that, a priori, the expected pass rate is around 65%, and values equal or below tο 50% are highly improbable. The prior probability Pr($\theta_A$ \<0.5) = 9.14 \* 10\^(-6). Based on the graph, the curve is highly informative and the priot density is peaked at around $\theta$≈0.65.
+
+## Question 2
+
+```{r, fig.width=5, fig.height=3}
+#calculationg the posterior beta distribution with
+#pr(thetaA > 0.7)
+shape1 = A_alpha+A_s
+shape2 = A_beta+A_f
+
+#printing and computiong the Pr(thetaA > 0.7 | xA) 
+cat('The posterior probability Pr(thetaA > 0.7 | xA) = ', 
+    pbeta(0.7, shape1, shape2, lower.tail = FALSE))
+
+#displaying the curve pf concentration for different theta.
+curve(dbeta(x, shape1, shape2),
+      main = "Posterior from Beta(169+130, 127+70)",
+      xlab = expression(theta),
+      ylab = "Density",
+      from = 0, to = 1,
+      lwd = 3)
+```
+
+The posterior probability Pr($\theta_A$ \> 0.7 \| xA) = 2.177698e-06. We can see a strongly concentrated posterior distribution with the center being somewhere around Posterior mean ≈ 0.602. The posterior mass lies within approximately from $\theta$ = 0.5 to $\theta$ = 0.7 with very little density outside that range.
+
+## Question 3
+
+We have seen that the probability of $\theta$ \>0.7 is extremely small, which is a fact that perfectly aligns with the concentration of the posterior density in that $\theta$. Therefore, we have evidence against the hypothesis that $\theta$ \> 0.7 a posteriori. Based on that information and the curve, the density reaches its highest point when the values of $\theta$ are near 0.6 (a point very close to the center of the curve), which makes $\theta$ ≈ 0.6 the most plausible.
+
+## Question 4
+
+```{r}
+n_sim = 3000
+set.seed(123)
+#theta from posterior Beta(299, 197) 
+theta_s = rbeta(n_sim, 299, 197)
+#Future counts from Binomial(296, theta)
+x_sim = rbinom(n_sim, 296, theta_s)
+
+#Barplot
+barplot(table(x_sim)/sum(table(x_sim)),
+        main = 'Posterior Predictive Counts', 
+        ylab='Predictive probability', 
+        xlab = expression(tilde(x)[A]))
+#Mean - predictive probability
+cat("P(x̃A >= 180 | xA ) =", mean(x_sim>= 180))
+```
+
+The posterior predictive distribution is centered near 178, slightly above the observed value $x_A = 169$. This is a reasonable fit for the model to the data. The estimated probability $P(\tilde{x}_A \ge 180)$ ≈ 0.4533. This shows that observing 180 or more passes in a future set is possible but not certain under the fitted model. That can be seen in the bar-plot also, there is a marked amount of concentration in posterior predictive mass close to or above 180.
+
+## Question 5
+
+```{r, message=FALSE, warning=FALSE, error=FALSE}
+Sys.setenv(R_MAKEVARS_USER = normalizePath("~/.R/Makevars.win", winslash = "/"))
+library(rstan)
+rstan_options(auto_write = TRUE)
+#The Stan code for the model
+stancode = '
+data
+{
+  //variables for A
+  int <lower=0> nA;
+  int <lower=0, upper=nA> xA;
+  //Varables for B
+  int <lower=0> nB;
+  int <lower=0, upper=nB> xB;
+}
+parameters
+{
+  //theta for A
+  real <lower=0, upper=1> thetaA;
+  //theta for B
+  real <lower=0, upper=1> thetaB;
+
+}
+model
+{
+  thetaB ~ beta(2, 2); // model for B
+  xB ~ binomial(nB,thetaB);
+  
+  thetaA ~ beta(130, 70);  // Model for A
+  xA ~ binomial(nA, thetaA);
+}
+generated quantities
+{
+  real diff;
+  diff = thetaB - thetaA;//the posterior distribution 
+//of the difference theta_diff=thetaB-thetaA 
+}'
+#adding the stan model into a variable
+invisible(capture.output(
+  BB_model <- rstan::stan_model(model_code = stancode),
+  file = NULL
+))
+
+#giving numbers to the stan code variables
+nA = 296 ; xA = A_alpha
+nB = 380 ; xB = B_alpha
+
+
+#running the model with iter 1500.
+BB_posterior <- sampling(
+  BB_model,
+  iter = 1500,
+  seed = 123,
+  data = list(nA = nA, xA = xA,
+              nB = nB, xB = xB),
+  refresh = 0
+)
+#printing the model results.
+print(BB_posterior, pars = c("thetaA", "thetaB", "diff"))
+```
+
+Method B seems a little more effective, with an average pass rate of around 65% compared to method A which has an approximate 60% pass rate. In order to determine which method is better, it is important to be mentioned that Method B's higher pass rate is relative due to the fact that the the difference $\theta_B$ - $\theta_A$ ≈ 0.05 and could be a result how the data was randomly generated. That indicates that we do not have enough evidence to be definitively sure that the method B provides for sure better results than method A.
+
+## Question 6
+
+```{r, fig.width=5, fig.height=3}
+#Passing all sample values from the model as a matrix
+pos_mat <- as.matrix(BB_posterior, pars = c("thetaA","thetaB","diff"))
+dim(pos_mat)
+
+#histogram for thetaΑ
+hist(pos_mat[, "thetaA"], probability = TRUE,
+     main = expression("Posterior of " * theta[A]),
+     xlab = expression(theta[A]))
+
+#histogram for thetaΒ
+hist(pos_mat[, "thetaB"], probability = TRUE,
+     main = expression("Posterior of " * theta[B]),
+     xlab = expression(theta[B]))
+
+#histogram for thetaB-thetaA
+hist(pos_mat[, "diff"], probability = TRUE,
+     main = expression("Posterior of " * (theta[B] - theta[A])),
+     xlab = expression(theta[B] - theta[A]))
+#P(thetaA>thetaB|data)
+Pdiffzero <- mean(pos_mat[, "diff"] < 0)
+cat("P(theta_A > theta_B | data) =", Pdiffzero, "\n")
+```
+
+The distributions for the posteriors of $\theta_A$ and $\theta_B$ are both highly informative with a strongly distributed center. In case of posterior of $\theta_B$, we observe the center of its concentration is a little higher $\theta_B$ ≈ 0.65 compared to the method A that the center is located around $\theta_A$ ≈ 0.60. For the posteriors of $\theta_B$-$\theta_A$, it is noticeable that we have a strong concentration at 0.05 which is the difference between the means of the posteriors $\theta_A$ and $\theta_B$. The difference spans from -0.05 up to 0.15 with by far the most highly concentrated part be $\theta_B$-$\theta_A$ ≈ 0.05 and the concentration clearly leans towards positive values. These results suggest results in favor of method B rather than method A, even though the conclusion can not be absolute.
